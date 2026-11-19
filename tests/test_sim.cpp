@@ -113,9 +113,15 @@ TEST_CASE("each control moves the aircraft in the JSBSim sign convention") {
 }
 
 TEST_CASE("controls outside their range are clamped") {
-  // JSBSim itself does not clamp: -5 and -1 give different pitch there.
+  // JSBSim itself does not clamp: elevator -5 and -1 give different pitch
+  // there. Each pair below lands beyond the same limit, so it must match.
   CHECK(Offset(&Controls::elevator, -5.0, 2.0) ==
         Offset(&Controls::elevator, -1.0, 2.0));
+  CHECK(Offset(&Controls::aileron, 5.0, 2.0) ==
+        Offset(&Controls::aileron, 1.0, 2.0));
+  // Trim throttle is 0.72, so both offsets fall below the 0 limit.
+  CHECK(Offset(&Controls::throttle, -5.0, 2.0) ==
+        Offset(&Controls::throttle, -1.0, 2.0));
 }
 
 TEST_CASE("a non-finite control is rejected") {
