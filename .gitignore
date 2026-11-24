@@ -1,2 +1,4 @@
 build/
 /out/
+flight.csv
+*.mcap

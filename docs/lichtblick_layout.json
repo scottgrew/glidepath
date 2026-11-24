@@ -1,0 +1,103 @@
+{
+  "configById": {
+    "map!flight": {
+      "followTopic": "/position",
+      "layer": "map",
+      "zoomLevel": 12
+    },
+    "Plot!altitude": {
+      "paths": [
+        {
+          "value": "/flight.display.altitude_ft",
+          "color": "#4e9af1",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/flight.display.target_altitude_ft",
+          "color": "#f1a14e",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showLegend": true
+    },
+    "Plot!airspeed": {
+      "paths": [
+        {
+          "value": "/flight.display.airspeed_kt",
+          "color": "#4e9af1",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/flight.display.target_airspeed_kt",
+          "color": "#f1a14e",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showLegend": true
+    },
+    "Plot!heading": {
+      "paths": [
+        {
+          "value": "/flight.display.heading_deg",
+          "color": "#4e9af1",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/flight.display.target_heading_deg",
+          "color": "#f1a14e",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showLegend": true
+    },
+    "Plot!attitude": {
+      "paths": [
+        {
+          "value": "/flight.display.bank_deg",
+          "color": "#4e9af1",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        },
+        {
+          "value": "/flight.display.pitch_deg",
+          "color": "#f1a14e",
+          "enabled": true,
+          "timestampMethod": "receiveTime"
+        }
+      ],
+      "showLegend": true
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": "map!flight",
+    "second": {
+      "direction": "column",
+      "first": {
+        "direction": "column",
+        "first": "Plot!altitude",
+        "second": "Plot!airspeed",
+        "splitPercentage": 50
+      },
+      "second": {
+        "direction": "column",
+        "first": "Plot!heading",
+        "second": "Plot!attitude",
+        "splitPercentage": 50
+      },
+      "splitPercentage": 50
+    },
+    "splitPercentage": 45
+  }
+}

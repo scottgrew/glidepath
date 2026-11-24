@@ -21,6 +21,6 @@ Checks: >
   -misc-header-include-cycle
 WarningsAsErrors: '*'
 CheckOptions:
-  misc-include-cleaner.IgnoreHeaders: 'FGFDMExec.h;initialization/.*;simgear/.*;FGJSBBase.h;catch2/.*'
+  misc-include-cleaner.IgnoreHeaders: 'FGFDMExec.h;initialization/.*;simgear/.*;FGJSBBase.h;catch2/.*;Eigen/.*'
   misc-const-correctness.AnalyzePointers: false
-HeaderFilterRegex: '/glidepath/(src|tests)/[^/]*$'
+HeaderFilterRegex: '/(fsw|sim|app|tests)/[^/]*$'
