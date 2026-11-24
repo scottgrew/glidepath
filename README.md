@@ -12,7 +12,7 @@ C++ flight software for a Cessna 172 simulated in JSBSim. It takes off from Palo
 | `autoland_xwind_{left,right}_{5,10}` | the same with a 5 or 10 kt crosswind |
 | `takeoff` | takeoff from runway 31 and climb to 1000 ft |
 
-## How it works
+## Method
 
 The flight software runs at 40 Hz. JSBSim steps the aircraft at 120 Hz.
 
