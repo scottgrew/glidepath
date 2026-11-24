@@ -75,3 +75,12 @@ sim/    JSBSim plant, sensor model and GNSS error model
 app/    scenarios, the flight loop, CSV, Lichtblick and FlightGear output
 tests/  unit tests and closed-loop flight tests (Catch2)
 ```
+
+## Status
+
+- Working: takeoff, approaches, calm and crosswind autoland, the error-state EKF with tightly coupled GNSS, satellite and sensor fault detection and exclusion, and engine-out detection with a glide at 75 kt.
+- In progress: engine-out glide to a landing on runway 31 in wind (on a branch, not merged).
+- Planned:
+  - Monte Carlo runs over wind, turbulence and sensor faults, with touchdown dispersion checked against the FAA AC 120-28D autoland limits, with and without fault detection.
+  - A replay view of any run: the flown path against the approach path, estimated against true position, and the injected fault.
+  - The flight software as a separate process with an operator link.
