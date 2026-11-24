@@ -1,49 +1,62 @@
 # glidepath (full)
 
-Extension of `main`. It replaces main's complementary filter and linear Kalman filter with an error-state EKF tightly coupled to per-satellite GNSS pseudoranges and Doppler, adds satellite and sensor fault detection and exclusion, models IMU bias drift, and detects an engine failure and glides.
+This branch extends `main`. It replaces the complementary filter and linear Kalman filter with an error-state EKF tightly coupled to GNSS pseudoranges and Doppler, adds fault detection and exclusion for satellites and sensors, models IMU bias drift, and handles an engine failure.
 
-C++ flight software for a Cessna 172 simulated in JSBSim. It takes off from Palo Alto (KPAO) runway 31, flies approaches, and lands on runway 31 in calm air, in 5 and 10 kt crosswinds, and with a faulty GNSS satellite. The autopilot flies on its own navigation estimate, computed from simulated sensors, not on the simulator's true state. FlightGear draws the aircraft; Lichtblick shows the telemetry.
+C++ flight software for a Cessna 172 in the JSBSim flight dynamics model. It takes off from and lands on runway 31 at Palo Alto (KPAO), including landings in 5 and 10 kt crosswinds and with a faulty GNSS satellite. The autopilot uses the navigation estimate from simulated sensors. FlightGear and Lichtblick display the flight.
 
 ## Scenarios
 
-| name | what it flies |
+| name | flight |
 |---|---|
 | `hold`, `climb`, `turn`, `slow`, `tour` | cruise at 4000 ft with altitude, heading and airspeed changes |
 | `approach` | a flight plan onto final for runway 31 and a low pass |
 | `autoland` | final approach fix to a stop on runway 31 |
 | `autoland_xwind_{left,right}_{5,10}` | the same with a 5 or 10 kt crosswind |
 | `autoland_gnss_step`, `autoland_gnss_ramp` | autoland with a 50 m step or a 0.5 m/s ramp on one satellite's pseudorange |
-| `engine_out_glide` | the engine stops 10 s in from 3000 ft; the aircraft glides at 75 kt |
+| `engine_out_glide` | the engine stops 10 s after the start at 3000 ft and the aircraft glides at 75 kt |
 | `takeoff` | takeoff from runway 31 and climb to 1000 ft |
 
 ## Method
 
-The flight software runs at 40 Hz. JSBSim steps the aircraft at 120 Hz.
+The flight software runs at 40 Hz and JSBSim at 120 Hz.
 
-**Control** (`fsw/autopilot`, `fsw/guidance`)
-- Cascaded PID loops on elevator, aileron, rudder and throttle hold altitude, heading and airspeed targets.
-- Flight plans are flown leg by leg with L1 lateral guidance (Park, Deyst and How, 2004).
+### Control
 
-**Landing and takeoff** (`fsw/landing`, `fsw/takeoff`, `fsw/ground`)
-- Approach on the runway centerline and a 3° glideslope, flare at 6 m, touchdown, idle and brakes to a stop.
-- In a crosswind the aircraft crabs into the wind on final, then holds the runway heading with rudder before touchdown and keeps the wings level on the rollout.
-- Takeoff: ground roll on the centerline, rotation, climb-out and level-off at 1000 ft.
+Cascaded PID loops on elevator, aileron, rudder and throttle hold altitude, heading and airspeed. Flight plans are flown with L1 lateral guidance (Park, Deyst and How, 2004). Code: `fsw/autopilot`, `fsw/guidance`.
 
-**Navigation** (`fsw/ekf`, `fsw/estimator`, `fsw/gnss`)
-- Error-state EKF over position, velocity, attitude and gyro and accelerometer biases, plus the receiver clock bias and drift and one range bias per GNSS channel. IMU samples drive the prediction.
-- GNSS is tightly coupled: each visible satellite's pseudorange and range rate corrects the filter directly. Satellite positions come from the 24-slot GPS baseline constellation.
-- Barometric altitude, magnetometer field and radar altitude (0.5 to 50 m) also correct it. Airspeed comes from the pitot tube.
+### Landing and takeoff
 
-**Integrity** (`fsw/integrity`)
-- Solution separation: a bank of sub-filters, one per GNSS channel with that satellite left out, plus one each without the barometer, magnetometer and radar altimeter.
-- A sub-filter whose position separates from the main filter beyond its threshold flags that source; the excluded solution is then flown.
+The approach tracks the runway centerline and a 3° glideslope. The flare starts at 6 m. After touchdown the throttle goes to idle and the brakes stop the aircraft. In a crosswind the aircraft crabs into the wind on final, aligns with the runway using rudder before touchdown, and holds the wings level on the rollout.
 
-**Engine out** (`fsw/engine_monitor`): the tachometer latches an engine failure after the rpm stays low in the air; the aircraft then holds its heading and glides at 75 kt.
+Takeoff is a ground roll on the centerline, rotation, climb-out and level-off at 1000 ft.
 
-**Sensors** (`sim/sensors`, `sim/gnss_errors`)
-- IMU at 40 Hz with white noise from datasheet noise densities and Gauss-Markov bias drift (300 s time constant).
-- GNSS fix and per-satellite pseudoranges and range rates at 10 Hz, with signal-in-space range error, receiver noise and a drifting receiver clock. A step or ramp fault can be injected on one satellite.
-- Barometer, magnetometer and pitot at 20 Hz, radar altimeter at 40 Hz, tachometer.
+Code: `fsw/landing`, `fsw/takeoff`, `fsw/ground`.
+
+### Navigation
+
+An error-state EKF estimates position, velocity, attitude, gyro and accelerometer biases, the GNSS receiver clock bias and drift, and a range bias for each GNSS channel. IMU samples drive the prediction. Each visible satellite's pseudorange and range rate correct the filter directly, as do barometric altitude, the magnetometer, and radar altitude between 0.5 and 50 m. Satellite positions come from the 24-slot GPS baseline constellation.
+
+Airspeed comes from the pitot tube. Code: `fsw/ekf`, `fsw/estimator`, `fsw/gnss`.
+
+### Fault detection and exclusion
+
+A bank of sub-filters runs beside the main filter: one per GNSS channel with that satellite left out, and one each without the barometer, the magnetometer and the radar altimeter. When a sub-filter's position separates from the main filter's by more than its threshold, the left-out source is flagged and the aircraft flies that sub-filter's solution. Code: `fsw/integrity`.
+
+### Engine failure
+
+The engine is declared failed after the tachometer reads low rpm in the air for a confirmation time. The aircraft then holds its heading and glides at 75 kt. Code: `fsw/engine_monitor`.
+
+### Sensors
+
+| sensor | rate |
+|---|---|
+| IMU | 40 Hz |
+| GNSS fix, pseudoranges and range rates | 10 Hz |
+| barometer, magnetometer, pitot | 20 Hz |
+| radar altimeter | 40 Hz |
+| tachometer | 40 Hz |
+
+The IMU noise comes from datasheet noise densities, and its biases drift as Gauss-Markov processes with a 300 s time constant. GNSS ranges carry signal-in-space range error, receiver noise and a drifting receiver clock, and a step or ramp fault can be injected on one satellite. The other sensors have white noise. Code: `sim/sensors`, `sim/gnss_errors`.
 
 ## Build
 
@@ -65,7 +78,7 @@ make live SCENARIO=engine_out_glide # telemetry for Lichtblick on ws://localhost
 make record SCENARIO=autoland       # telemetry to autoland.mcap
 ```
 
-Open `docs/lichtblick_layout.json` in Lichtblick for the instrument layout. Every run also writes each 40 Hz cycle (true state, targets, commands) to `flight.csv`.
+`docs/lichtblick_layout.json` is the Lichtblick instrument layout. Each run writes every 40 Hz cycle (true state, targets, commands) to `flight.csv`.
 
 ## Layout
 
@@ -78,9 +91,9 @@ tests/  unit tests and closed-loop flight tests (Catch2)
 
 ## Status
 
-- Working: takeoff, approaches, calm and crosswind autoland, the error-state EKF with tightly coupled GNSS, satellite and sensor fault detection and exclusion, and engine-out detection with a glide at 75 kt.
-- In progress: engine-out glide to a landing on runway 31 in wind (on a branch, not merged).
+- Done: takeoff, approaches, calm and crosswind autoland, the error-state EKF with tightly coupled GNSS, fault detection and exclusion, and engine-failure detection with a glide.
+- In progress: an engine-out glide to a landing on runway 31 in wind.
 - Planned:
   - Monte Carlo runs over wind, turbulence and sensor faults, with touchdown dispersion checked against the FAA AC 120-28D autoland limits, with and without fault detection.
-  - A replay view of any run: the flown path against the approach path, estimated against true position, and the injected fault.
+  - A replay of any run showing the flown path against the approach path, estimated against true position, and the injected fault.
   - The flight software as a separate process with an operator link.
