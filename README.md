@@ -16,7 +16,7 @@ C++ flight software for a Cessna 172 simulated in JSBSim. It takes off from Palo
 | `engine_out_glide` | the engine stops 10 s in from 3000 ft; the aircraft glides at 75 kt |
 | `takeoff` | takeoff from runway 31 and climb to 1000 ft |
 
-## How it works
+## Method
 
 The flight software runs at 40 Hz. JSBSim steps the aircraft at 120 Hz.
 
