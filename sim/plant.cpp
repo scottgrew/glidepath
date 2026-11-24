@@ -211,6 +211,7 @@ Plant::Plant(const std::filesystem::path& jsbsim_root,
       RequireNode(*fdm_, "accelerations/a-pilot-y-ft_sec2");
   specific_force_nodes_[2] =
       RequireNode(*fdm_, "accelerations/a-pilot-z-ft_sec2");
+  engine_rpm_node_ = RequireNode(*fdm_, "propulsion/engine/engine-rpm");
 }
 
 Plant::~Plant() = default;
@@ -266,6 +267,14 @@ std::array<double, 3> Plant::specific_force() const {
   return {specific_force_nodes_[0]->getDoubleValue() * glidepath::fsw::kFoot,
           specific_force_nodes_[1]->getDoubleValue() * glidepath::fsw::kFoot,
           specific_force_nodes_[2]->getDoubleValue() * glidepath::fsw::kFoot};
+}
+
+void Plant::StopEngine() {
+  fdm_->SetPropertyValue("fcs/mixture-cmd-norm", 0.0);
+}
+
+double Plant::engine_rpm() const {
+  return engine_rpm_node_->getDoubleValue();
 }
 
 }  // namespace glidepath::sim

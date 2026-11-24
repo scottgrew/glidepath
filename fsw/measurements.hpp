@@ -1,7 +1,8 @@
-// Sensor sample types for the estimator and the sensor model.
+// Sensor sample types for the error-state EKF and the sensor model.
 #pragma once
 #include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace glidepath::fsw {
 
@@ -42,6 +43,22 @@ struct RadarSample {
   double height_m;  // Vertical height over the runway plane.
 };
 
+struct TachSample {
+  bool valid;
+  double rpm;
+};
+
+// Number of GNSS channels, the measured visible maximum at KPAO over a sidereal
+// day.
+inline constexpr std::size_t kMaxChannels = 10;
+
+// One satellite's pseudorange and range rate for one channel.
+struct RangeSample {
+  int slot;
+  double pseudorange_m;
+  double range_rate_m_s;
+};
+
 struct SensorFrame {
   double time_s{};
   ImuSample imu{};
@@ -50,8 +67,12 @@ struct SensorFrame {
   MagSample mag{};
   PitotSample pitot{};
   RadarSample radar{};
+  TachSample tach{};
   bool main_gear_on_ground{};
   bool nose_gear_on_ground{};  // Squat switches: no noise.
+  std::array<RangeSample, kMaxChannels> ranges{};
+  std::size_t range_count{};
+  double gps_seconds_since_epoch{};
 };
 
 inline bool IsFinite(const double value) noexcept {
@@ -87,6 +108,10 @@ inline bool IsUsable(const PitotSample& sample) noexcept {
 
 inline bool IsUsable(const RadarSample& sample) noexcept {
   return sample.valid && IsFinite(sample.height_m);
+}
+
+inline bool IsUsable(const TachSample& sample) noexcept {
+  return sample.valid && IsFinite(sample.rpm);
 }
 
 }  // namespace glidepath::fsw

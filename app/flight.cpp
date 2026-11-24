@@ -5,12 +5,17 @@
 #include "fsw/ground.hpp"
 #include "fsw/landing.hpp"
 #include "fsw/runway.hpp"
+#include "fsw/ekf.hpp"
+#include "fsw/ekf_layout.hpp"
+#include "fsw/engine_monitor.hpp"
 #include "fsw/estimator.hpp"
+#include "fsw/integrity.hpp"
 #include "fsw/measurements.hpp"
 #include "fsw/sensor_specs.hpp"
 #include "fsw/takeoff.hpp"
 #include "fsw/types.hpp"
 #include "fsw/units.hpp"
+#include "sim/gnss_errors.hpp"
 #include "sim/plant.hpp"
 #include "sim/sensors.hpp"
 
@@ -76,42 +81,54 @@ sim::InitialCondition AutolandInitialCondition(
 
 }  // namespace
 
-const std::array<Scenario, 12>& Scenarios() noexcept {
-  static const std::array<Scenario, 12> kScenarios{{
+const std::array<Scenario, 15>& Scenarios() noexcept {
+  static const std::array<Scenario, 15> kScenarios{{
       {.name = "hold",
        .description = "Holds level cruise at 4000 ft and 100 kt, heading east",
        .start = kCruise,
        .duration_s = 60.0,
-       .changes = {}},
+       .changes = {},
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "climb",
        .description = "Climbs 500 ft",
        .start = kCruise,
        .duration_s = 90.0,
-       .changes = kClimb},
+       .changes = kClimb,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "turn",
        .description = "Turns right from heading 090 to 180",
        .start = kCruise,
        .duration_s = 60.0,
-       .changes = kTurn},
+       .changes = kTurn,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "slow",
        .description = "Slows from 100 to 90 kt",
        .start = kCruise,
        .duration_s = 60.0,
-       .changes = kSlow},
+       .changes = kSlow,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "tour",
        .description =
            "Climbs, turns, slows, then descends and turns back up to "
            "speed over five minutes",
        .start = kCruise,
        .duration_s = 300.0,
-       .changes = kTour},
+       .changes = kTour,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "approach",
        .description = "Flies a flight plan onto final for Palo Alto runway 31 "
                       "and makes a low pass",
        .start = kCruise,
        .duration_s = 700.0,
        .changes = {},
-       .make_plan = &PaloAltoApproach},
+       .make_plan = &PaloAltoApproach,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "autoland",
        .description =
            "Lands on Palo Alto runway 31 from the final approach fix",
@@ -120,7 +137,9 @@ const std::array<Scenario, 12>& Scenarios() noexcept {
        .changes = {},
        .make_plan = &PaloAltoAutolandPlan,
        .land = true,
-       .state_source = StateSource::kEstimate},
+       .state_source = StateSource::kEstimate,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "autoland_xwind_left_10",
        .description = "Autoland with 10 kt crosswind from the left of the "
                       "landing direction",
@@ -131,7 +150,9 @@ const std::array<Scenario, 12>& Scenarios() noexcept {
        .changes = {},
        .make_plan = &PaloAltoAutolandPlan,
        .land = true,
-       .state_source = StateSource::kEstimate},
+       .state_source = StateSource::kEstimate,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "autoland_xwind_right_10",
        .description =
            "Autoland with 10 kt crosswind from the right of the landing "
@@ -143,7 +164,9 @@ const std::array<Scenario, 12>& Scenarios() noexcept {
        .changes = {},
        .make_plan = &PaloAltoAutolandPlan,
        .land = true,
-       .state_source = StateSource::kEstimate},
+       .state_source = StateSource::kEstimate,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "autoland_xwind_left_5",
        .description = "Autoland with 5 kt crosswind from the left of the "
                       "landing direction",
@@ -154,7 +177,9 @@ const std::array<Scenario, 12>& Scenarios() noexcept {
        .changes = {},
        .make_plan = &PaloAltoAutolandPlan,
        .land = true,
-       .state_source = StateSource::kEstimate},
+       .state_source = StateSource::kEstimate,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "autoland_xwind_right_5",
        .description =
            "Autoland with 5 kt crosswind from the right of the landing "
@@ -166,7 +191,9 @@ const std::array<Scenario, 12>& Scenarios() noexcept {
        .changes = {},
        .make_plan = &PaloAltoAutolandPlan,
        .land = true,
-       .state_source = StateSource::kEstimate},
+       .state_source = StateSource::kEstimate,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
       {.name = "takeoff",
        .description =
            "Takes off from Palo Alto runway 31 and climbs to 1000 ft",
@@ -174,7 +201,44 @@ const std::array<Scenario, 12>& Scenarios() noexcept {
        .duration_s = 120.0,
        .changes = {},
        .make_plan = &PaloAltoTakeoffPlan,
-       .take_off = true},
+       .take_off = true,
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = std::nullopt},
+      {.name = "autoland_gnss_step",
+       .description = "Autoland with a 50 m GNSS step on the highest satellite "
+                      "60 s after the start",
+       .start = kAutolandStart,
+       .duration_s = 400.0,
+       .changes = {},
+       .make_plan = &PaloAltoAutolandPlan,
+       .land = true,
+       .state_source = StateSource::kEstimate,
+       .gnss_fault = sim::GnssFault{.slot = -1,
+                                    .start_s = 60.0,
+                                    .step_m = 50.0,
+                                    .ramp_m_per_s = 0.0},
+       .engine_failure_s = std::nullopt},
+      {.name = "autoland_gnss_ramp",
+       .description = "Autoland with a GNSS ramp of 0.5 m/s on the highest "
+                      "satellite from 60 s after the start",
+       .start = kAutolandStart,
+       .duration_s = 400.0,
+       .changes = {},
+       .make_plan = &PaloAltoAutolandPlan,
+       .land = true,
+       .state_source = StateSource::kEstimate,
+       .gnss_fault =
+           sim::GnssFault{
+               .slot = -1, .start_s = 60.0, .step_m = 0.0, .ramp_m_per_s = 0.5},
+       .engine_failure_s = std::nullopt},
+      {.name = "engine_out_glide",
+       .description = "Engine stops 10 s in from 3000 ft and the airplane "
+                      "glides at 75 kt",
+       .start = AutolandInitialCondition({}, 3000.0 * fsw::kFoot),
+       .duration_s = 200.0,
+       .changes = {},
+       .gnss_fault = std::nullopt,
+       .engine_failure_s = 10.0},
   }};
   return kScenarios;
 }
@@ -265,31 +329,51 @@ fsw::ActuatorCommands ControlCycle(
 
 struct Observer {
   StateSource source = StateSource::kTruth;
-  fsw::EstimatorConfig config{};
+  fsw::EkfConfig ekf_config{};
   sim::SensorModel sensor_model = sim::StartSensors(fsw::kDefaultSpecs, 0);
   fsw::EstimatorMemory estimator_memory = fsw::StartEstimator();
+  fsw::AidingUse aiding{};
+  fsw::IntegrityConfig integrity_config{};
+  fsw::IntegrityMemory integrity_memory = fsw::StartIntegrity();
 };
 
 fsw::SensorFrame Observe(Observer& observer, const sim::Plant& plant) noexcept {
   if (observer.source == StateSource::kTruth) {
-    return fsw::SensorFrame{};
+    // Truth mode reads the engine directly; no other sensor is sampled.
+    fsw::SensorFrame frame{};
+    frame.tach = {.valid = true, .rpm = plant.engine_rpm()};
+    return frame;
   }
-  return sim::SampleSensors(observer.config.specs, observer.sensor_model,
-                            plant.truth(), plant.specific_force());
+  return sim::SampleSensors(observer.ekf_config.specs, observer.sensor_model,
+                            plant.truth(), plant.specific_force(),
+                            plant.engine_rpm());
 }
 
 CycleRecord MakeRecord(const fsw::VehicleState& truth,
                        const fsw::VehicleState& flown,
-                       const fsw::NavSnapshot& snapshot,
+                       const fsw::EkfSnapshot& snapshot,
                        const fsw::Targets& targets,
                        const fsw::ActuatorCommands& commands) {
   CycleRecord record{};
   record.truth = truth;
   record.estimate = flown;
-  record.nav = snapshot;
+  record.ekf = snapshot;
   record.targets = targets;
   record.commands = commands;
   return record;
+}
+
+// Targets once the engine is out: hold the heading at detection and glide at
+// 75 kt with pitch. The best glide ratio, 10.2, is at 75-80 KCAS (PLAN glide
+// table).
+void EngineOutTargets(const fsw::VehicleState& flown, fsw::Targets& targets) {
+  targets.lateral_mode = fsw::LateralMode::kHeading;
+  targets.heading_rad = flown.heading_rad;
+  targets.vertical_mode = fsw::VerticalMode::kAirspeed;
+  targets.calibrated_airspeed_m_s = 75.0 * fsw::kKnot;
+  targets.throttle_mode = fsw::ThrottleMode::kDirect;
+  targets.throttle = 0.0;
+  targets.flaps = 0.0;
 }
 
 struct CycleContext {
@@ -307,8 +391,24 @@ struct CycleContext {
   std::optional<fsw::TakeoffMemory>* takeoff_memory;
   fsw::ActuatorCommands* last_commands;
   bool* landed_extra_cycle;
+  fsw::EngineMonitorMemory* engine_monitor;
   const std::function<void(const CycleRecord&)>* record;
 };
+
+// Runs the engine monitor for one cycle. On the cycle it latches, the targets
+// become the engine-out glide.
+bool UpdateEngineOut(const fsw::SensorFrame& frame,
+                     const fsw::VehicleState& flown, const double time_s,
+                     fsw::EngineMonitorMemory& monitor, fsw::Targets& targets) {
+  const bool was_engine_out = monitor.engine_out;
+  const bool engine_out =
+      fsw::UpdateEngineMonitor(fsw::kDefaultEngineMonitor, frame.tach, time_s,
+                               !flown.main_gear_on_ground, monitor);
+  if (engine_out && !was_engine_out) {
+    EngineOutTargets(flown, targets);
+  }
+  return engine_out;
+}
 
 bool RunOneCycle(const CycleContext& ctx, const double time_s,
                  std::span<const TargetChange>::iterator* change_it,
@@ -320,19 +420,47 @@ bool RunOneCycle(const CycleContext& ctx, const double time_s,
 
   const fsw::SensorFrame frame = Observe(*ctx.observer, *ctx.plant);
   fsw::VehicleState flown = ctx.plant->truth();
-  fsw::NavSnapshot snapshot{};
+  fsw::EkfSnapshot snapshot{};
+  fsw::IntegrityStatus integrity{};
   bool estimate_valid = true;
   if (ctx.flown_source == StateSource::kEstimate) {
     const fsw::Estimate estimate = fsw::UpdateEstimator(
-        ctx.observer->config, frame, &ctx.observer->estimator_memory);
+        ctx.observer->ekf_config, frame, &ctx.observer->estimator_memory,
+        ctx.observer->aiding);
     estimate_valid = estimate.valid;
     flown = estimate.state;
-    snapshot = estimate.nav;
+    snapshot = estimate.snapshot;
+    integrity = fsw::UpdateIntegrity(ctx.observer->ekf_config,
+                                     ctx.observer->integrity_config, frame,
+                                     estimate, ctx.observer->estimator_memory,
+                                     &ctx.observer->integrity_memory);
+    if (integrity.flown != 0) {
+      const std::size_t sub_index = integrity.flown - 1;
+      const fsw::IntegrityMemory& memory = ctx.observer->integrity_memory;
+      const std::span subs{memory.sub};
+      const std::optional<fsw::Ekf>& sub = subs[sub_index];
+      if (sub.has_value()) {
+        const fsw::Estimate sub_estimate = fsw::EstimateFromFilter(
+            ctx.observer->ekf_config, *sub, frame,
+            ctx.observer->estimator_memory.pitot_cas_m_s,
+            estimate.snapshot.innovations);
+        if (sub_estimate.valid) {
+          flown = sub_estimate.state;
+        }
+      }
+    }
   }
+
+  const bool engine_out =
+      UpdateEngineOut(frame, flown, time_s, *ctx.engine_monitor, *ctx.targets);
 
   fsw::ActuatorCommands commands{};
   if (ctx.flown_source == StateSource::kEstimate && !estimate_valid) {
     commands = *ctx.last_commands;
+  } else if (engine_out) {
+    commands =
+        fsw::UpdateAutopilot(*ctx.config, *ctx.targets, flown, *ctx.memory);
+    *ctx.last_commands = commands;
   } else {
     commands = ControlCycle(
         flown, *ctx.config, *ctx.memory, *ctx.targets, *ctx.plan,
@@ -348,8 +476,11 @@ bool RunOneCycle(const CycleContext& ctx, const double time_s,
   for (int step = 0; step < kStepsPerCycle; ++step) {
     ctx.plant->step(commands);
   }
-  const CycleRecord record =
+  CycleRecord record =
       MakeRecord(ctx.plant->truth(), flown, snapshot, *ctx.targets, commands);
+  record.integrity = integrity;
+  record.injected_gnss_slot = ctx.observer->sensor_model.gnss_errors.fault_slot;
+  record.engine_out = engine_out;
   (*ctx.record)(record);
 
   if (ctx.landing_memory->has_value() &&
@@ -455,7 +586,7 @@ std::optional<fsw::FlightPlan> PaloAltoApproach() noexcept {
 }
 
 const Scenario* FindScenario(const std::string_view name) noexcept {
-  const std::array<Scenario, 12>& scenarios = Scenarios();
+  const std::array<Scenario, 15>& scenarios = Scenarios();
   const auto* const it = std::ranges::find(scenarios, name, &Scenario::name);
   return it == scenarios.end() ? nullptr : &*it;
 }
@@ -486,10 +617,12 @@ void Fly(const Scenario& scenario, const std::filesystem::path& jsbsim_root,
       sensor_options.source.value_or(scenario.state_source);
   Observer observer{
       .source = flown_source,
-      .config{.specs = fsw::kDefaultSpecs,
-              .terrain_elevation_m = start.terrain_elevation_m},
+      .ekf_config{.specs = fsw::kDefaultSpecs,
+                  .terrain_elevation_m = start.terrain_elevation_m},
       .sensor_model =
-          sim::StartSensors(fsw::kDefaultSpecs, sensor_options.seed),
+          sim::StartSensors(fsw::kDefaultSpecs, sensor_options.seed,
+                            sim::GnssErrorSpec{.fault = scenario.gnss_fault}),
+      .integrity_config{.course_rad = RunwayCourseRad()},
   };
 
   if (flown_source == StateSource::kEstimate) {
@@ -531,6 +664,8 @@ void Fly(const Scenario& scenario, const std::filesystem::path& jsbsim_root,
   auto change_it = scenario.changes.begin();
   const auto change_end = scenario.changes.end();
   bool landed_extra_cycle = false;
+  fsw::EngineMonitorMemory engine_monitor = fsw::StartEngineMonitor();
+  bool engine_stopped = false;
   fsw::ActuatorCommands last_commands = trim.commands;
   const CycleContext cycle_ctx{
       .plant = &plant,
@@ -547,11 +682,17 @@ void Fly(const Scenario& scenario, const std::filesystem::path& jsbsim_root,
       .takeoff_memory = &takeoff_memory,
       .last_commands = &last_commands,
       .landed_extra_cycle = &landed_extra_cycle,
+      .engine_monitor = &engine_monitor,
       .record = &record,
   };
 
   for (std::int64_t cycle = 0; cycle < cycles; ++cycle) {
     const double t = static_cast<double>(cycle) / fsw::kControlRateHz;
+    if (scenario.engine_failure_s && !engine_stopped &&
+        t >= *scenario.engine_failure_s) {
+      plant.StopEngine();
+      engine_stopped = true;
+    }
     if (RunOneCycle(cycle_ctx, t, &change_it, change_end)) {
       break;
     }

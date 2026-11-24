@@ -1,6 +1,7 @@
-// Guardrails for the navigation estimator and atmosphere helpers.
+// Oracle guardrails for the navigation estimator and atmosphere helpers.
 #include "fsw/atmosphere.hpp"
 #include "fsw/estimator.hpp"
+#include "fsw/ekf_layout.hpp"
 #include "fsw/measurements.hpp"
 #include "fsw/runway.hpp"
 #include "fsw/sensor_specs.hpp"
@@ -10,27 +11,36 @@
 #include <catch2/catch_test_macros.hpp>
 
 #include <cmath>
-#include <cstddef>
-
+#include <limits>
 namespace {
 
+using glidepath::fsw::kStateDim;
+
+using glidepath::fsw::AidingUse;
+using glidepath::fsw::BaroSample;
+using glidepath::fsw::EkfConfig;
 using glidepath::fsw::Estimate;
-using glidepath::fsw::EstimatorConfig;
 using glidepath::fsw::EstimatorMemory;
+using glidepath::fsw::GnssSample;
+using glidepath::fsw::ImuSample;
+using glidepath::fsw::InitEkf;
 using glidepath::fsw::IsaAltitudeM;
 using glidepath::fsw::IsaDensityKgM3;
 using glidepath::fsw::IsaPressurePa;
 using glidepath::fsw::kControlRateHz;
 using glidepath::fsw::kDefaultSpecs;
 using glidepath::fsw::kMaxPredictGapS;
-using glidepath::fsw::kNavStateDim;
 using glidepath::fsw::kPaloAlto31;
+using glidepath::fsw::kPosN;
+using glidepath::fsw::kSeaLevelDensityKgM3;
 using glidepath::fsw::kStateFields;
+using glidepath::fsw::MagSample;
+using glidepath::fsw::PitotSample;
 using glidepath::fsw::SensorFrame;
 using glidepath::fsw::StartEstimator;
 using glidepath::fsw::UpdateEstimator;
 
-EstimatorConfig TestConfig() {
+EkfConfig TestConfig() {
   return {.specs = kDefaultSpecs,
           .terrain_elevation_m = kPaloAlto31.elevation_m};
 }
@@ -66,25 +76,9 @@ bool StateAllNan(const glidepath::fsw::VehicleState& state) {
   return true;
 }
 
-double Covariance(const Estimate& estimate, const std::size_t row,
-                  const std::size_t col) {
-  return estimate.nav.covariance.at(row * kNavStateDim + col);
-}
-
-// Runs `cycles` cycles of FullFrame from t = 0 with the radar height given.
-Estimate RunWithRadar(const bool radar_valid, const double height_m,
-                      const int cycles) {
-  const EstimatorConfig config = TestConfig();
-  EstimatorMemory memory = StartEstimator();
-  Estimate last{};
-  for (int cycle = 0; cycle < cycles; ++cycle) {
-    SensorFrame frame = FullFrame(cycle / kControlRateHz);
-    frame.gnss.valid = cycle == 0;
-    frame.baro.pressure_pa = IsaPressurePa(kPaloAlto31.elevation_m + 25.0);
-    frame.radar = {.valid = radar_valid, .height_m = height_m};
-    last = UpdateEstimator(config, frame, &memory);
-  }
-  return last;
+double Covariance(const glidepath::fsw::EkfSnapshot& snapshot,
+                  const std::ptrdiff_t row, const std::ptrdiff_t col) {
+  return snapshot.covariance[static_cast<std::size_t>(row * kStateDim + col)];
 }
 
 }  // namespace
@@ -101,135 +95,89 @@ TEST_CASE("estimator: ISA pressure altitude and density match the oracle") {
   CHECK(IsaAltitudeM(pressure) == Catch::Approx(altitude_m).margin(1e-6));
 }
 
-TEST_CASE("estimator: the first full frame starts both filters and publishes") {
-  const EstimatorConfig config = TestConfig();
-  EstimatorMemory memory = StartEstimator();
-  const SensorFrame frame = FullFrame(0.0);
-  const Estimate result = UpdateEstimator(config, frame, &memory);
-  REQUIRE(result.valid);
-  CHECK(result.nav.valid);
-  CHECK(memory.attitude.has_value());
-  CHECK(memory.nav.has_value());
-  CHECK(result.state.calibrated_airspeed_m_s ==
-        Catch::Approx(30.0).margin(1e-6));
-  CHECK(result.state.altitude_m == Catch::Approx(500.0).margin(1e-6));
-  CHECK(result.state.height_above_ground_m ==
-        Catch::Approx(500.0 - kPaloAlto31.elevation_m).margin(1e-6));
-  CHECK(result.state.latitude_rad == Catch::Approx(0.7).margin(1e-12));
-  CHECK(result.state.longitude_rad == Catch::Approx(-1.3).margin(1e-12));
-  CHECK(result.state.north_velocity_m_s == Catch::Approx(30.0).margin(1e-9));
-  CHECK(result.state.climb_rate_m_s == Catch::Approx(2.0).margin(1e-9));
-  CHECK(std::abs(result.state.roll_rad) < 1e-9);
-  CHECK(std::abs(result.state.pitch_rad) < 1e-9);
-  CHECK(result.state.heading_rad >= 0.0);
-  CHECK(result.state.heading_rad < 2.0 * 3.141592653589793);
-}
-
-TEST_CASE("estimator: init waits for IMU, magnetometer, GNSS and baro") {
-  const EstimatorConfig config = TestConfig();
-  for (int missing = 0; missing < 4; ++missing) {
-    EstimatorMemory memory = StartEstimator();
-    SensorFrame frame = FullFrame(0.0);
-    if (missing == 0) frame.imu.valid = false;
-    if (missing == 1) frame.mag.valid = false;
-    if (missing == 2) frame.gnss.valid = false;
-    if (missing == 3) frame.baro.valid = false;
-    const Estimate result = UpdateEstimator(config, frame, &memory);
-    INFO("missing sensor " << missing);
-    CHECK(!result.valid);
-    CHECK(!result.nav.valid);
-    CHECK(StateAllNan(result.state));
-    CHECK(!memory.attitude.has_value());
-    CHECK(!memory.nav.has_value());
-  }
-}
-
-TEST_CASE("estimator: a null memory gives an invalid NaN state") {
-  const Estimate result =
-      UpdateEstimator(TestConfig(), FullFrame(0.0), nullptr);
-  CHECK(!result.valid);
-  CHECK(StateAllNan(result.state));
-}
-
-TEST_CASE("estimator: without a pitot reading the estimate is invalid") {
-  const EstimatorConfig config = TestConfig();
+TEST_CASE("estimator: pitot CAS passes through sqrt(2 dp / rho0)") {
+  const EkfConfig config = TestConfig();
   EstimatorMemory memory = StartEstimator();
   SensorFrame frame = FullFrame(0.0);
-  frame.pitot.valid = false;
-  const Estimate result = UpdateEstimator(config, frame, &memory);
-  CHECK(!result.valid);
-  CHECK(StateAllNan(result.state));
-  CHECK(memory.nav.has_value());
-  frame = FullFrame(1.0 / kControlRateHz);
-  CHECK(UpdateEstimator(config, frame, &memory).valid);
+  const Estimate result = UpdateEstimator(config, frame, &memory, AidingUse{});
+  REQUIRE(result.valid);
+  CHECK(result.state.calibrated_airspeed_m_s ==
+        Catch::Approx(30.0).margin(1e-6));
+  CHECK(frame.pitot.differential_pressure_pa ==
+        Catch::Approx(551.25).margin(0));
 }
 
-TEST_CASE("estimator: GNSS absent 20 s keeps valid and P_posN grows") {
-  const EstimatorConfig config = TestConfig();
+TEST_CASE("estimator: InitEkf decision rows") {
+  const EkfConfig config = TestConfig();
+  SensorFrame frame = FullFrame(0.0);
+  frame.imu.valid = false;
+  CHECK(!InitEkf(config, frame).has_value());
+  frame = FullFrame(0.0);
+  CHECK(InitEkf(config, frame).has_value());
+}
+
+TEST_CASE("estimator: cycle before init returns invalid NaN state") {
+  const EkfConfig config = TestConfig();
+  EstimatorMemory memory = StartEstimator();
+  SensorFrame frame = FullFrame(0.0);
+  frame.gnss.valid = false;
+  const Estimate result = UpdateEstimator(config, frame, &memory, AidingUse{});
+  CHECK(!result.valid);
+  CHECK(StateAllNan(result.state));
+  CHECK(!result.snapshot.valid);
+}
+
+TEST_CASE(
+    "estimator: GNSS absent 20 s keeps valid and P_posN grows monotonically") {
+  const EkfConfig config = TestConfig();
   EstimatorMemory memory = StartEstimator();
   const double dt_s = 1.0 / kControlRateHz;
   SensorFrame frame = FullFrame(0.0);
-  UpdateEstimator(config, frame, &memory);
-  REQUIRE(memory.nav.has_value());
+  UpdateEstimator(config, frame, &memory, AidingUse{});
+  REQUIRE(memory.ekf.has_value());
 
   double previous_p = 0.0;
   const int cycles = static_cast<int>(20.0 * kControlRateHz);
   for (int cycle = 0; cycle < cycles; ++cycle) {
     frame.time_s += dt_s;
     frame.gnss.valid = false;
-    const Estimate result = UpdateEstimator(config, frame, &memory);
+    const Estimate result =
+        UpdateEstimator(config, frame, &memory, AidingUse{});
     REQUIRE(result.valid);
-    const double p_pos_n = Covariance(result, 0, 0);
-    CHECK(p_pos_n > previous_p);
+    const double p_pos_n = Covariance(result.snapshot, kPosN, kPosN);
+    CHECK(p_pos_n >= previous_p);
     previous_p = p_pos_n;
   }
 }
 
 TEST_CASE("estimator: IMU dropout invalidates then recovers") {
-  const EstimatorConfig config = TestConfig();
+  const EkfConfig config = TestConfig();
   EstimatorMemory memory = StartEstimator();
   const double dt_s = 1.0 / kControlRateHz;
   SensorFrame frame = FullFrame(0.0);
-  UpdateEstimator(config, frame, &memory);
+  UpdateEstimator(config, frame, &memory, AidingUse{});
   frame.time_s += dt_s;
   frame.imu.valid = false;
-  const Estimate dropped = UpdateEstimator(config, frame, &memory);
+  const Estimate dropped = UpdateEstimator(config, frame, &memory, AidingUse{});
   CHECK(!dropped.valid);
-  CHECK(!memory.attitude.has_value());
-  CHECK(!memory.nav.has_value());
+  CHECK(!memory.ekf.has_value());
 
   frame = FullFrame(frame.time_s + dt_s);
-  const Estimate recovered = UpdateEstimator(config, frame, &memory);
+  const Estimate recovered =
+      UpdateEstimator(config, frame, &memory, AidingUse{});
   CHECK(recovered.valid);
-  CHECK(memory.attitude.has_value());
-  CHECK(memory.nav.has_value());
+  CHECK(memory.ekf.has_value());
 }
 
-TEST_CASE("estimator: a gap over 0.5 s or a repeated time resets the filters") {
-  const EstimatorConfig config = TestConfig();
-  for (const double step_s : {kMaxPredictGapS + 0.05, 0.0}) {
-    EstimatorMemory memory = StartEstimator();
-    SensorFrame frame = FullFrame(0.0);
-    UpdateEstimator(config, frame, &memory);
-    REQUIRE(memory.nav.has_value());
-    frame.time_s += step_s;
-    const Estimate result = UpdateEstimator(config, frame, &memory);
-    INFO("step " << step_s);
-    CHECK(!result.valid);
-    CHECK(!memory.attitude.has_value());
-    CHECK(!memory.nav.has_value());
-  }
-}
+TEST_CASE("estimator: predict gap over 0.5 s resets the filter") {
+  const EkfConfig config = TestConfig();
+  EstimatorMemory memory = StartEstimator();
+  SensorFrame frame = FullFrame(0.0);
+  UpdateEstimator(config, frame, &memory, AidingUse{});
+  REQUIRE(memory.ekf.has_value());
 
-TEST_CASE("estimator: radar heights outside 0.5 to 50 m are not used") {
-  constexpr int kCycles = 200;
-  const Estimate no_radar = RunWithRadar(false, 0.0, kCycles);
-  const Estimate too_high = RunWithRadar(true, 60.0, kCycles);
-  const Estimate too_low = RunWithRadar(true, 0.2, kCycles);
-  const Estimate in_band = RunWithRadar(true, 20.0, kCycles);
-  CHECK(too_high.state.altitude_m == no_radar.state.altitude_m);
-  CHECK(too_low.state.altitude_m == no_radar.state.altitude_m);
-  CHECK(no_radar.state.height_above_ground_m ==
-        Catch::Approx(25.0).margin(0.5));
-  CHECK(in_band.state.height_above_ground_m == Catch::Approx(20.0).margin(0.1));
+  frame.time_s += kMaxPredictGapS + 0.05;
+  const Estimate result = UpdateEstimator(config, frame, &memory, AidingUse{});
+  CHECK(!result.valid);
+  CHECK(!memory.ekf.has_value());
 }

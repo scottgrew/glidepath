@@ -10,8 +10,10 @@
 #include <string_view>
 
 #include "fsw/autopilot.hpp"
-#include "fsw/estimator.hpp"
+#include "fsw/ekf_layout.hpp"
 #include "fsw/guidance.hpp"
+#include "fsw/integrity.hpp"
+#include "sim/gnss_errors.hpp"
 #include "fsw/types.hpp"
 #include "fsw/units.hpp"
 #include "sim/plant.hpp"
@@ -38,15 +40,23 @@ struct Scenario {
   bool land = false;
   bool take_off = false;
   StateSource state_source = StateSource::kTruth;
+  // A pseudorange fault injected in the simulator (G11d).
+  std::optional<sim::GnssFault> gnss_fault;
+  // The simulator stops the engine at this scenario time.
+  std::optional<double> engine_failure_s;
 };
 
 // What one flight-software cycle saw and did.
 struct CycleRecord {
   fsw::VehicleState truth{};
   fsw::VehicleState estimate{};
-  fsw::NavSnapshot nav{};
+  fsw::EkfSnapshot ekf{};
   fsw::Targets targets;
   fsw::ActuatorCommands commands{};
+  fsw::IntegrityStatus integrity{};
+  // Slot of the injected GNSS fault, -1 when none has started.
+  int injected_gnss_slot = -1;
+  bool engine_out{};
 };
 
 inline constexpr std::uint64_t kDefaultSensorSeed = 20261121;
@@ -117,7 +127,7 @@ inline constexpr sim::InitialCondition kAutolandStart{
     .heading_rad = 0.0,
     .terrain_elevation_m = 6.7 * fsw::kFoot};
 
-const std::array<Scenario, 12>& Scenarios() noexcept;
+const std::array<Scenario, 15>& Scenarios() noexcept;
 
 // The scenario named `name`, or nullptr.
 const Scenario* FindScenario(std::string_view name) noexcept;

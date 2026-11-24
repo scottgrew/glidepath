@@ -81,6 +81,9 @@ TEST_CASE("every scenario flies to the end on its final targets") {
     // Flight-plan scenarios end on guidance targets; test_approach.cpp
     // checks them against the runway.
     if (scenario.make_plan != nullptr) continue;
+    // Engine-out scenarios end on the glide targets; test_engine_out.cpp
+    // checks them.
+    if (scenario.engine_failure_s.has_value()) continue;
     INFO(scenario.name);
     const std::vector<CycleRecord> records = Run(scenario);
     REQUIRE(records.size() ==

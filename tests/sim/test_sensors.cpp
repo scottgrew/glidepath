@@ -84,8 +84,10 @@ TEST_CASE("sensors: same seed gives identical frames") {
   SensorModel b = StartSensors(kDefaultSpecs, 42);
   const VehicleState truth = LevelTruth(0.0);
   const std::array<double, 3> specific_force = LevelSpecificForce();
-  const auto frame_a = SampleSensors(kDefaultSpecs, a, truth, specific_force);
-  const auto frame_b = SampleSensors(kDefaultSpecs, b, truth, specific_force);
+  const auto frame_a =
+      SampleSensors(kDefaultSpecs, a, truth, specific_force, 0.0);
+  const auto frame_b =
+      SampleSensors(kDefaultSpecs, b, truth, specific_force, 0.0);
   CHECK(frame_a.imu.gyro_rad_s[0] == frame_b.imu.gyro_rad_s[0]);
   CHECK(frame_a.gnss.latitude_rad == frame_b.gnss.latitude_rad);
   CHECK(frame_a.baro.pressure_pa == frame_b.baro.pressure_pa);
@@ -96,16 +98,20 @@ TEST_CASE("sensors: different seeds diverge") {
   SensorModel b = StartSensors(kDefaultSpecs, 2);
   const VehicleState truth = LevelTruth(0.0);
   const std::array<double, 3> specific_force = LevelSpecificForce();
-  const auto frame_a = SampleSensors(kDefaultSpecs, a, truth, specific_force);
-  const auto frame_b = SampleSensors(kDefaultSpecs, b, truth, specific_force);
+  const auto frame_a =
+      SampleSensors(kDefaultSpecs, a, truth, specific_force, 0.0);
+  const auto frame_b =
+      SampleSensors(kDefaultSpecs, b, truth, specific_force, 0.0);
   CHECK(frame_a.baro.pressure_pa != frame_b.baro.pressure_pa);
 }
 
 TEST_CASE("sensors: noise standard deviations match the specs") {
   SensorModel model = StartSensors(kDefaultSpecs, 12345);
   const double dt_s = 1.0 / kControlRateHz;
-  const double gyro_sigma = kDefaultSpecs.gyro_noise_sigma_rad_s;
-  const double accel_sigma = kDefaultSpecs.accel_noise_sigma_m_s2;
+  const double gyro_sigma =
+      kDefaultSpecs.gyro_density_rad_s_per_sqrt_hz / std::sqrt(kControlRateHz);
+  const double accel_sigma =
+      kDefaultSpecs.accel_density_m_s2_per_sqrt_hz / std::sqrt(kControlRateHz);
   const double gnss_sigma = kDefaultSpecs.gnss_horizontal_sigma_m;
   const double velocity_sigma = kDefaultSpecs.gnss_velocity_sigma_m_s;
   const double baro_sigma = kDefaultSpecs.baro_pressure_sigma_pa;
@@ -138,7 +144,7 @@ TEST_CASE("sensors: noise standard deviations match the specs") {
   for (std::size_t frame = 0; frame < kFrames; ++frame) {
     truth.time_s = static_cast<double>(frame) * dt_s;
     const auto sample =
-        SampleSensors(kDefaultSpecs, model, truth, specific_force);
+        SampleSensors(kDefaultSpecs, model, truth, specific_force, 0.0);
     if (sample.imu.valid) {
       gyro_x.push_back(sample.imu.gyro_rad_s[0] - truth.roll_rate_rad_s -
                        model.gyro_bias_rad_s[0]);
@@ -199,19 +205,6 @@ TEST_CASE("sensors: noise standard deviations match the specs") {
   CHECK(within_spec(gnss_north, gnss_sigma));
 }
 
-TEST_CASE("sensors: the IMU bias stays constant") {
-  SensorModel model = StartSensors(kDefaultSpecs, 777);
-  const std::array<double, 3> gyro_bias_start = model.gyro_bias_rad_s;
-  const std::array<double, 3> accel_bias_start = model.accel_bias_m_s2;
-  const VehicleState truth = LevelTruth(0.0);
-  const std::array<double, 3> specific_force = LevelSpecificForce();
-  for (int frame = 0; frame < 400; ++frame) {
-    (void)SampleSensors(kDefaultSpecs, model, truth, specific_force);
-  }
-  CHECK(model.gyro_bias_rad_s == gyro_bias_start);
-  CHECK(model.accel_bias_m_s2 == accel_bias_start);
-}
-
 TEST_CASE("sensors: initial bias spread matches sigma_b") {
   constexpr std::size_t kSeeds = 2000;
   constexpr std::int64_t kLateFrame = 400;
@@ -238,7 +231,7 @@ TEST_CASE("sensors: initial bias spread matches sigma_b") {
     for (std::int64_t frame = 0; frame < kLateFrame; ++frame) {
       VehicleState advancing = truth;
       advancing.time_s = static_cast<double>(frame) * dt_s;
-      (void)SampleSensors(kDefaultSpecs, model, advancing, specific_force);
+      (void)SampleSensors(kDefaultSpecs, model, advancing, specific_force, 0.0);
     }
     gyro_frame400.push_back(model.gyro_bias_rad_s[0]);
     accel_frame400.push_back(model.accel_bias_m_s2[0]);
@@ -259,12 +252,14 @@ TEST_CASE("sensors: radar is invalid outside the valid height band") {
   const std::array<double, 3> specific_force = LevelSpecificForce();
   VehicleState low = LevelTruth(0.0);
   low.height_above_ground_m = 0.4;
-  const auto below = SampleSensors(kDefaultSpecs, model, low, specific_force);
+  const auto below =
+      SampleSensors(kDefaultSpecs, model, low, specific_force, 0.0);
   CHECK(!below.radar.valid);
 
   VehicleState high = LevelTruth(0.025);
   high.height_above_ground_m = 51.0;
-  const auto above = SampleSensors(kDefaultSpecs, model, high, specific_force);
+  const auto above =
+      SampleSensors(kDefaultSpecs, model, high, specific_force, 0.0);
   CHECK(!above.radar.valid);
 }
 
@@ -274,9 +269,10 @@ TEST_CASE("sensors: each sensor is due only on its period") {
   VehicleState low = LevelTruth(0.0);
   low.altitude_m = 20.0;
   low.height_above_ground_m = 10.0;
-  (void)SampleSensors(kDefaultSpecs, model, low, specific_force);
+  (void)SampleSensors(kDefaultSpecs, model, low, specific_force, 0.0);
   low.time_s = 0.025;
-  const auto at_one = SampleSensors(kDefaultSpecs, model, low, specific_force);
+  const auto at_one =
+      SampleSensors(kDefaultSpecs, model, low, specific_force, 0.0);
   CHECK(at_one.imu.valid);
   CHECK(!at_one.gnss.valid);
   CHECK(!at_one.baro.valid);

@@ -85,19 +85,19 @@ target_compile_options(
   glidepath_warnings
   INTERFACE -Wall -Wextra -Werror -Wconversion -Wsign-conversion -Wshadow)
 
-add_library(glidepath_fsw STATIC fsw/atmosphere.cpp fsw/attitude.cpp
-                                            fsw/autopilot.cpp
-                                            fsw/estimator.cpp
-                                            fsw/geodesy.cpp
+add_library(glidepath_fsw STATIC fsw/atmosphere.cpp fsw/autopilot.cpp
+                                            fsw/ekf.cpp fsw/estimator.cpp
+                                            fsw/geodesy.cpp fsw/gnss.cpp
+                                            fsw/engine_monitor.cpp
                                             fsw/ground.cpp
-                                            fsw/guidance.cpp
-                                            fsw/nav_filter.cpp
+                                            fsw/guidance.cpp fsw/integrity.cpp
                                             fsw/landing.cpp fsw/takeoff.cpp)
 target_include_directories(glidepath_fsw PUBLIC ${PROJECT_SOURCE_DIR})
 target_link_libraries(glidepath_fsw PUBLIC Eigen3::Eigen
                                              PRIVATE glidepath_warnings)
 
-add_library(glidepath_sim STATIC sim/plant.cpp sim/sensors.cpp)
+add_library(glidepath_sim STATIC sim/gnss_errors.cpp sim/plant.cpp
+                                          sim/sensors.cpp)
 target_link_libraries(glidepath_sim PUBLIC glidepath_fsw PRIVATE libJSBSim
                                              glidepath_warnings)
 target_compile_definitions(
@@ -111,20 +111,24 @@ add_executable(glidepath app/main.cpp)
 target_link_libraries(glidepath PRIVATE glidepath_app foxglove_cpp
                                       glidepath_warnings)
 
-add_executable(glidepath_fsw_tests tests/fsw/test_attitude.cpp
-                                   tests/fsw/test_autopilot.cpp
+add_executable(glidepath_fsw_tests tests/fsw/test_autopilot.cpp
+                                   tests/fsw/test_ekf.cpp
+                                   tests/fsw/test_engine_monitor.cpp
+                                   tests/fsw/test_gnss.cpp
                                    tests/fsw/test_estimator.cpp
                                    tests/fsw/test_ground.cpp
                                    tests/fsw/test_guidance.cpp
+                                   tests/fsw/test_integrity.cpp
                                    tests/fsw/test_landing.cpp
-                                   tests/fsw/test_nav_filter.cpp
                                    tests/fsw/test_takeoff.cpp)
 target_link_libraries(
   glidepath_fsw_tests
   PRIVATE glidepath_fsw glidepath_warnings Catch2::Catch2WithMain)
 catch_discover_tests(glidepath_fsw_tests)
 
-add_executable(glidepath_tests tests/sim/test_plant.cpp
+add_executable(glidepath_tests tests/sim/test_gnss_errors.cpp
+                               tests/sim/test_gnss_sensors.cpp
+                               tests/sim/test_plant.cpp
                                tests/sim/test_sensors.cpp
                                tests/app/test_estimate.cpp
                                tests/sim/test_autopilot_loop.cpp
@@ -132,7 +136,9 @@ add_executable(glidepath_tests tests/sim/test_plant.cpp
                                tests/app/test_telemetry.cpp
                                tests/app/test_approach.cpp
                                tests/app/test_autoland.cpp
-                               tests/app/test_takeoff.cpp)
+                               tests/app/test_takeoff.cpp
+                               tests/app/test_integrity_flight.cpp
+                               tests/app/test_engine_out.cpp)
 target_link_libraries(glidepath_tests PRIVATE glidepath_app foxglove_cpp
                                               mcap_headers ${ZSTD_LIBRARY}
                                               ${LZ4_LIBRARY} glidepath_warnings

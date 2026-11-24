@@ -59,6 +59,9 @@ class Plant {
   fsw::VehicleState truth() const;
   // Body specific force without gravity, m/s^2.
   std::array<double, 3> specific_force() const;
+  // Sets the mixture to cut off; the engine and its propeller stop.
+  void StopEngine();
+  double engine_rpm() const;
 
  private:
   struct BoundCommand {
@@ -80,6 +83,7 @@ class Plant {
   SGPropertyNode* main_wow_node_ = nullptr;
   SGPropertyNode* nose_wow_node_ = nullptr;
   std::array<SGPropertyNode*, 3> specific_force_nodes_{};
+  SGPropertyNode* engine_rpm_node_ = nullptr;
 };
 
 }  // namespace glidepath::sim
